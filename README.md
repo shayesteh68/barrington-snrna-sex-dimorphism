@@ -1,92 +1,119 @@
-# Sexual Dimorphism in Barrington’s Nucleus (`Penk+`) Neurons: snRNA-seq Pipeline
+# End-to-End Single-Cell RNA-Seq Analysis Pipeline (Seurat v5)
+**Profiling 3k Peripheral Blood Mononuclear Cells (PBMCs) with Unsupervised Clustering and Cell Type Annotation**
 
-[![R](https://img.shields.io/badge/R-4.x-blue.svg)](https://www.r-project.org/)
-[![Seurat](https://img.shields.io/badge/Seurat-v5.0-green.svg)](https://satijalab.org/seurat/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Author](https://img.shields.io/badge/Author-Narges%20Shayesteh-orange.svg)](https://github.com/shayesteh68)
-
-An end-to-end, memory-optimized single-nucleus RNA sequencing (snRNA-seq) pipeline analyzing pontine micturition center (PMC / Barrington's nucleus) cell types, with a primary focus on sexually dimorphic gene expression within **`Penk+` Barrington projection neurons**.
-
-Based on public snRNA-seq cohort data from **Dr. Anne M.J. Verstegen's laboratory** ([GEO: GSE226809](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE226809)).
+![R](https://img.shields.io/badge/R-4.3+-blue.svg)
+![Seurat](https://img.shields.io/badge/Seurat-v5-green.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
-## 🔬 Scientific Background & Rationale
-
-Barrington’s nucleus (pontine micturition center; PMC) provides primary supraspinal control over the lower urinary tract, orchestrating detrusor contraction and urinary sphincter coordination. Proenkephalin-expressing (`Penk+`) and corticotropin-releasing hormone-expressing (`Crh+`) neurons within Barrington’s nucleus show significant clinical and translational relevance regarding sex-biased bladder dysfunction, interstitial cystitis, and stress-induced urinary incontinence.
-
-This project delivers:
-1. **Large-scale QC & Integration** across 30 snRNA-seq samples (66,994 high-quality nuclei).
-2. **High-resolution cluster annotation** resolving Barrington excitatory, inhibitory, and glial populations.
-3. **Targeted Sex-Differential Expression Analysis** within confirmed `Penk+` Barrington neurons ($N = 1,632$ nuclei).
+## Overview
+This repository contains a reproducible, end-to-end single-cell RNA-sequencing (scRNA-seq) workflow implemented in **R** using **Seurat v5**. The pipeline processes the standard 10x Genomics **PBMC 3k** dataset (Peripheral Blood Mononuclear Cells from a healthy donor), performing quality control, normalization, feature selection, dimensionality reduction, unsupervised graph-based clustering, differential expression analysis, and biological cell type annotation.
 
 ---
 
-## 📊 Key Results & Biological Findings
+## Biological Insights & Results
 
-### 1. Robust Cell-Type Deconvolution
-Across 23 resolved clusters, canonical cell-type identities were clearly established:
-- **Cluster 8 (`Penk+` Barrington Neurons):** High-level marker expression (`Penk` = 8.36, `Slc17a6` = 1.22, `Gad1` = 1.49).
-- **Clusters 13 & 21 (Glutamatergic Neurons):** Enriched in `Slc17a6` (2.58 - 2.77) with baseline `Gad1` expression.
-- **Clusters 7, 12 & 22 (GABAergic Interneurons):** Marked by robust `Gad1` expression (2.27 - 2.56).
-- **Clusters 2, 19 & 20 (Astrocytes):** Confirmed by high `Aqp4` levels (6.44 - 11.03).
-- **Clusters 3, 4 & 18 (Oligodendrocytes):** Confirmed by pan-myelin `Mbp` expression (59.3 - 161.7).
+The analysis identified **9 distinct immune cell populations** based on well-established canonical markers:
 
-### 2. Validated Sex-Dimorphic Profiles in `Penk+` Neurons (Wilcoxon Test)
-Differential expression between female ($n = 949$) and male ($n = 683$) nuclei in Cluster 8 revealed high internal validation:
-* **Female-Enriched:** 
-  * `Xist` ($\log_2\text{FC} = +8.49$, $p_{adj} = 5.58 \times 10^{-198}$, $81.6\%$ vs $0.1\%$)
-  * `Tsix` ($\log_2\text{FC} = +5.69$, $p_{adj} = 7.71 \times 10^{-37}$, $23.8\%$ vs $0.3\%$)
-* **Male-Enriched:** 
-  * `Eif2s3y` ($\log_2\text{FC} = -11.26$, $p_{adj} = 1.50 \times 10^{-56}$)
-  * `Kdm5d` ($\log_2\text{FC} = -10.22$, $p_{adj} = 2.83 \times 10^{-28}$)
-  * `Uty` ($\log_2\text{FC} = -10.03$, $p_{adj} = 7.36 \times 10^{-23}$)
-  * `Ddx3y` ($\log_2\text{FC} = -9.73$, $p_{adj} = 7.46 \times 10^{-21}$)
-* **Physiological / Autosomal Candidates:**
-  * `mt-Nd1` ($\log_2\text{FC} = -0.58$, $p_{adj} = 0.027$): Male-biased baseline mitochondrial respiratory complex I subunit expression.
-  * `Nr3c2` ($p = 1.82 \times 10^{-4}$): Male-biased mineralocorticoid receptor expression implicated in osmoregulation and volume-dependent micturition reflexes.
+| Cluster | Identified Cell Type | Canonical / Top Markers | Cell Count | Percentage (%) |
+| :---: | :--- | :--- | :---: | :---: |
+| **0** | Naive CD4+ T cells | `CCR7`, `LEF1`, `MAL`, `PIK3IP1` | 684 | 25.9% |
+| **1** | CD14+ Monocytes | `CD14`, `S100A8`, `S100A9`, `FOLR3` | 481 | 18.2% |
+| **2** | Memory CD4+ T cells | `AQP3`, `CD40LG`, `CD2`, `TRAT1` | 476 | 18.0% |
+| **3** | B cells | `CD79A`, `VPREB3`, `TCL1A`, `LINC00926` | 344 | 13.0% |
+| **4** | CD8+ T cells | `CD8A`, `GZMK`, `GZMH`, `CCL5` | 291 | 11.0% |
+| **5** | FCGR3A+ (CD16+) Monocytes | `CKB`, `CDKN1C`, `MS4A4A`, `HES4` | 162 | 6.1% |
+| **6** | Natural Killer (NK) cells | `GNLY`, `GZMB`, `SPON2`, `AKR1C3` | 155 | 5.9% |
+| **7** | Dendritic Cells (DCs) | `FCER1A`, `CLEC10A`, `SERPINF1` | 32 | 1.2% |
+| **8** | Platelets | `PPBP`, `ITGA2B (CD41)`, `GP9`, `PF4` | 13 | 0.5% |
+
+<p align="center">
+  <img src="figures/08_umap_annotated_celltypes.png" width="65%" alt="UMAP Cell Annotation">
+  <img src="figures/09_cell_type_proportions.png" width="65%" alt="Cell Type Proportions">
+</p>
 
 ---
 
-## 📁 Repository Structure
+## Pipeline Workflow
+
+1. **Quality Control & Filtering (`01_qc_filter.R`)**:
+   - Filtered low-quality cells and potential doublets/empty droplets:
+     - `nFeature_RNA`: 200 to 2,500 genes
+     - Mitochondrial read percentage: < 5%
+   - Retained **2,638 high-quality cells** out of 2,700 raw cells.
+
+2. **Normalization & Feature Selection (`02_normalize_pca.R`)**:
+   - Applied global scaling normalization (`LogNormalize`, scale factor = 10,000).
+   - Identified **top 2,000 highly variable genes (HVGs)** using variance-stabilizing transformation (`vst`).
+   - Scaled data and performed linear dimensionality reduction via **PCA**.
+
+3. **Graph-based Clustering & UMAP (`03_clustering_umap.R`)**:
+   - Constructed Shared Nearest Neighbor (SNN) graph using top 10 principal components.
+   - Clustered cells using the Louvain algorithm (`resolution = 0.5`).
+   - Projected cells onto 2D space using **UMAP**.
+
+4. **Biomarker Identification (`04_find_markers.R`)**:
+   - Wilcoxon Rank Sum test with Bonferroni correction (`FindAllMarkers`).
+   - Extracted positive cluster markers (`log2FC >= 0.25`, `min.pct = 0.25`).
+   - Generated marker expression Heatmaps and DotPlots.
+
+5. **Cell Type Annotation (`05_cell_annotation.R`)**:
+   - Curated and assigned immunological identities based on known markers.
+   - Generated final publication-ready figures.
+
+---
+
+## Repository Structure
+
 ```text
-barrington-snrna-sex-dimorphism/
 ├── data/
-│   ├── raw/               # GSE226809 DGE matrices (ignored in git)
-│   └── processed/         # Joined Seurat RDS objects (ignored in git)
-├── scripts/
-│   ├── 01_load_qc_integrate.R       # QC filtering, Seurat v5 Layer joining, PCA/UMAP
-│   ├── 02_annotate_celltypes.R      # Marker dot plots, feature plots & cluster profiling
-│   └── 03_penk_sex_differential.R   # Cluster 8 isolation, Wilcoxon test, Volcano plot
+│   └── filtered_gene_bc_matrices/hg19/
+├── figures/
 ├── results/
-│   ├── figures/
-│   │   ├── barrington_umap_clusters_sex.png
-│   │   ├── barrington_canonical_markers_dotplot.png
-│   │   └── penk_neurons_sex_volcano.png
-│   └── tables/
-│       ├── cluster_canonical_markers_summary.tsv
-│       └── penk_neurons_sex_degs.tsv
+│   ├── qc/
+│   ├── clustering/
+│   ├── markers/
+│   └── final_annotated_pbmc.rds
+├── scripts/
+│   ├── 01_qc_filter.R
+│   ├── 02_normalize_pca.R
+│   ├── 03_clustering_umap.R
+│   ├── 04_find_markers.R
+│   └── 05_cell_annotation.R
+├── environment.yml
 ├── .gitignore
 └── README.md
-⚙️ Installation & Reproducibility
-Conda Environment
-bash
-conda create -n r_seurat_env -c conda-forge -c bioconda r-base=4.3 r-seurat=5.0 r-ggplot2 r-dplyr r-ggrepel
+```
+
+---
+
+## Installation & Usage
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/shayesteh68/scrnaseq-seurat-pbmc3k.git
+cd scrnaseq-seurat-pbmc3k
+```
+
+### 2. Set up environment
+```bash
+conda env create -f environment.yml
 conda activate r_seurat_env
-Execution
-bash
-# 1. Quality Control, Normalization, Integration & UMAP
-Rscript scripts/01_load_qc_integrate.R
+```
 
-# 2. Cell-type Profiling & DotPlot Generation
-Rscript scripts/02_annotate_celltypes.R
+### 3. Run the pipeline
+```bash
+Rscript scripts/01_qc_filter.R
+Rscript scripts/02_normalize_pca.R
+Rscript scripts/03_clustering_umap.R
+Rscript scripts/04_find_markers.R
+Rscript scripts/05_cell_annotation.R
+```
 
-# 3. Cluster 8 Penk+ Sex-Differential Analysis & Volcano Plot
-Rscript scripts/03_penk_sex_differential.R
-👩‍💻 Author
-Narges Shayesteh
+---
 
-Bioinformatics & Computational Biology Specialist
-
-GitHub: @shayesteh68
-LinkedIn: Narges Shayesteh
+## Author
+**Narges Shayesteh**
+- LinkedIn: [linkedin.com/in/narges-shayesteh](https://linkedin.com/in/narges-shayesteh)
+- GitHub: [@shayesteh68](https://github.com/shayesteh68)
