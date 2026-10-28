@@ -1,147 +1,142 @@
+#!/usr/bin/env Rscript
+
 suppressPackageStartupMessages({
-    library(Seurat)
-    library(Matrix)
-    library(data.table)
-    library(ggplot2)
-    library(dplyr)
-    library(patchwork)
+  library(Seurat)
+  library(Matrix)
+  library(ggplot2)
+  library(patchwork)
 })
 
 raw_dir <- "data/raw"
-pmc_files <- sort(list.files(raw_dir, pattern = "Mm_PMC_.*_dge\\.tsv\\.gz$", full.names = TRUE))
-
-if(length(pmc_files) == 0) {
-    stop("No PMC dge files found in ", raw_dir)
-}
+pmc_files <- sort(list.files(raw_dir, pattern = "^GSM[0-9]+_Mm_PMC_.*_dge\\.tsv\\.gz$", full.names = TRUE))
+if (!length(pmc_files)) stop("No PMC DGE files found in data/raw/. Run scripts/00_download_geo.R first.")
 
 dir.create("data/processed", recursive = TRUE, showWarnings = FALSE)
 dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create("results/tables", recursive = TRUE, showWarnings = FALSE)
 
-cat("=== Step 1: Scanning and Loading PMC Samples (Sparse-Safe Loader) ===\n")
-cat("Found", length(pmc_files), "PMC sample files.\n")
+load_dge_as_sparse <- function(file_path, sample_id, min_features = 200L) {
+  con <- gzfile(file_path, open = "rt")
+  on.exit(close(con), add = TRUE)
+  header <- strsplit(readLines(con, n = 1L, warn = FALSE), "\t", fixed = TRUE)[[1]]
+  if (length(header) < 2L) stop("Invalid DGE header in ", file_path)
+  barcodes <- header[-1]
+  n_cells <- length(barcodes)
+  if (!n_cells || any(!nzchar(barcodes)) || anyDuplicated(barcodes)) {
+    stop("DGE header contains no cells or duplicated/empty barcodes in ", file_path)
+  }
+  genes <- character()
+  feature_count <- integer(n_cells)
+  i_chunks <- list()
+  j_chunks <- list()
+  x_chunks <- list()
+  row_index <- 0L
 
-load_dge_as_sparse <- function(file_path, sample_id) {
-    # Read header to count cells
-    header <- strsplit(readLines(gzfile(file_path), n = 1), "\t")[[1]]
-    barcodes <- header[-1]
-    cell_names <- paste0(sample_id, "_", barcodes)
-    
-    # Read entire table via fread as pure data.table
-    dt <- fread(file_path, header = TRUE, sep = "\t", showProgress = FALSE)
-    gene_names <- make.unique(gsub("_", "-", dt[[1]]))
-    
-    # Calculate column sums / detected genes per cell to discard empty droplets immediately
-    # Using matrix extraction only for non-empty columns
-    dt_vals <- dt[, -1, with = FALSE]
-    rm(dt)
-    
-    # Identify non-empty cells (at least 200 expressed genes)
-    col_nz <- vapply(dt_vals, function(col) sum(col > 0), integer(1))
-    valid_cols <- which(col_nz >= 200)
-    
-    if (length(valid_cols) == 0) {
-        rm(dt_vals)
-        gc(verbose = FALSE)
-        return(NULL)
+  repeat {
+    line <- readLines(con, n = 1L, warn = FALSE)
+    if (!length(line)) break
+    fields <- strsplit(line, "\t", fixed = TRUE)[[1]]
+    if (length(fields) != n_cells + 1L) stop("Row width mismatch in ", file_path)
+    row_index <- row_index + 1L
+    genes[row_index] <- fields[1]
+    values <- suppressWarnings(as.numeric(fields[-1]))
+    if (length(values) != n_cells || anyNA(values) || any(!is.finite(values)) ||
+        any(values < 0) || any(values != floor(values))) {
+      stop("Invalid count values in ", file_path, " at row ", row_index + 1L)
     }
-    
-    # Subset to keep only valid cells BEFORE dense conversion
-    dt_valid <- dt_vals[, valid_cols, with = FALSE]
-    rm(dt_vals)
-    
-    mat <- as(as.matrix(dt_valid), "dgCMatrix")
-    rm(dt_valid)
-    
-    rownames(mat) <- gene_names
-    colnames(mat) <- cell_names[valid_cols]
-    
-    gc(verbose = FALSE)
-    return(mat)
+    nz <- which(values != 0)
+    if (length(nz)) {
+      i_chunks[[length(i_chunks) + 1L]] <- rep.int(row_index, length(nz))
+      j_chunks[[length(j_chunks) + 1L]] <- nz
+      x_chunks[[length(x_chunks) + 1L]] <- values[nz]
+      feature_count <- feature_count + as.integer(values > 0)
+    }
+  }
+  if (!row_index) stop("No genes found in ", file_path)
+  keep_cells <- which(feature_count >= min_features)
+  if (!length(keep_cells)) return(NULL)
+
+  i <- unlist(i_chunks, use.names = FALSE)
+  j_original <- unlist(j_chunks, use.names = FALSE)
+  x <- unlist(x_chunks, use.names = FALSE)
+  keep_nz <- j_original %in% keep_cells
+  j <- match(j_original[keep_nz], keep_cells)
+  Matrix::sparseMatrix(
+    i = i[keep_nz],
+    j = j,
+    x = x[keep_nz],
+    dims = c(row_index, length(keep_cells)),
+    dimnames = list(make.unique(gsub("_", "-", genes)), paste0(sample_id, "_", barcodes[keep_cells]))
+  )
 }
 
 merged_pmc <- NULL
+sample_manifest <- data.frame(
+  library_id = character(), batch_id = character(), sex = character(),
+  retained_cells = integer(), stringsAsFactors = FALSE
+)
 
 for (i in seq_along(pmc_files)) {
-    f <- pmc_files[i]
-    base_name <- basename(f)
-    sample_id <- gsub("^GSM[0-9]+_Mm_PMC_", "", base_name)
-    sample_id <- gsub("_dge\\.tsv\\.gz$", "", sample_id)
+  file_path <- pmc_files[i]
+  file_name <- basename(file_path)
+  library_id <- sub("_.*$", "", file_name)
+  batch_code <- sub("^GSM[0-9]+_Mm_PMC_([0-9]+[FM])-.*_dge\\.tsv\\.gz$", "\\1", file_name)
+  if (identical(batch_code, file_name)) stop("Could not parse the GEO batch from sample title: ", file_name)
+  batch_id <- paste0("Bar_", batch_code)
+  sex_code <- substr(batch_code, nchar(batch_code), nchar(batch_code))
+  sex <- if (sex_code == "F") "Female" else if (sex_code == "M") "Male" else "Unknown"
+  if (sex == "Unknown") stop("Could not infer sex from the GEO batch title: ", file_name)
 
-    sex <- ifelse(grepl("[0-9]F-", sample_id), "Female",
-           ifelse(grepl("[0-9]M-", sample_id), "Male", "Unknown"))
+  message(sprintf("[%d/%d] Loading %s as %s (%s)", i, length(pmc_files), library_id, batch_id, sex))
+  mat <- load_dge_as_sparse(file_path, library_id)
+  if (is.null(mat) || !ncol(mat)) {
+    message("Skipping ", library_id, ": no cells passed the feature threshold.")
+    sample_manifest <- rbind(sample_manifest, data.frame(
+      library_id = library_id, batch_id = batch_id, sex = sex,
+      retained_cells = 0L, stringsAsFactors = FALSE
+    ))
+    next
+  }
 
-    cat(sprintf("[%d/%d] Reading %s (%s)...\n", i, length(pmc_files), sample_id, sex))
-
-    mat <- load_dge_as_sparse(f, sample_id)
-    if (is.null(mat) || ncol(mat) == 0) {
-        cat(sprintf("  Skipping %s (no cells passed 200-feature threshold)\n", sample_id))
-        next
-    }
-
-    s_obj <- CreateSeuratObject(counts = mat, project = "Barrington_PMC", min.cells = 3)
-    rm(mat)
-
-    s_obj$sample_id <- sample_id
-    s_obj$sex <- sex
-    s_obj[["percent.mt"]] <- PercentageFeatureSet(s_obj, pattern = "^mt-")
-
-    if (is.null(merged_pmc)) {
-        merged_pmc <- s_obj
-    } else {
-        merged_pmc <- merge(merged_pmc, y = s_obj, project = "Barrington_PMC")
-    }
-    rm(s_obj)
-    gc(verbose = FALSE)
+  obj <- CreateSeuratObject(counts = mat, project = "Barrington_PMC", min.cells = 3)
+  obj$sample_id <- batch_id
+  obj$batch_id <- batch_id
+  obj$library_id <- library_id
+  obj$sex <- sex
+  obj[["percent.mt"]] <- PercentageFeatureSet(obj, pattern = "^mt-")
+  merged_pmc <- if (is.null(merged_pmc)) obj else merge(merged_pmc, y = obj, project = "Barrington_PMC")
+  sample_manifest <- rbind(sample_manifest, data.frame(
+    library_id = library_id, batch_id = batch_id, sex = sex,
+    retained_cells = ncol(obj), stringsAsFactors = FALSE
+  ))
+  rm(mat, obj)
+  gc(verbose = FALSE)
 }
+if (is.null(merged_pmc)) stop("No sample passed the initial cell filter.")
+write.table(sample_manifest, "results/tables/GSE226809_PMC_library_manifest.tsv",
+            sep = "\t", quote = FALSE, row.names = FALSE)
+retained_libraries <- sample_manifest[sample_manifest$retained_cells > 0L, , drop = FALSE]
+batch_manifest <- unique(retained_libraries[, c("batch_id", "sex"), drop = FALSE])
+if (anyDuplicated(batch_manifest$batch_id)) stop("A GEO batch maps to more than one sex.")
+if (any(table(batch_manifest$sex) < 2L)) stop("Need at least two GEO batches per sex for pseudobulk DE.")
+message("Using ", nrow(batch_manifest), " GEO batches as biological replicates; GSM libraries within a batch will be aggregated.")
 
-cat("=== Step 2: Consolidating Layers ===\n")
 merged_pmc[["RNA"]] <- JoinLayers(merged_pmc[["RNA"]])
-gc(verbose = FALSE)
-
-cat(sprintf("Total raw nuclei: %d | Total genes: %d\n", ncol(merged_pmc), nrow(merged_pmc)))
-print(table(merged_pmc$sex))
-
-cat("=== Step 3: Nuclei QC & Filtering ===\n")
-qc_plot <- VlnPlot(merged_pmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
-                   group.by = "sex", ncol = 3, pt.size = 0)
-ggsave("results/figures/qc_vlnplot_raw.png",
-       plot = qc_plot, width = 11, height = 4.5, dpi = 300)
+qc_plot <- VlnPlot(merged_pmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), group.by = "sex", ncol = 3, pt.size = 0)
+ggsave("results/figures/qc_vlnplot_raw.png", qc_plot, width = 11, height = 4.5, dpi = 300)
 
 pmc_filtered <- subset(merged_pmc, subset = nFeature_RNA > 300 & nFeature_RNA < 6000 & percent.mt < 5)
-rm(merged_pmc)
-gc(verbose = FALSE)
-
-cat(sprintf("Nuclei passing QC: %d\n", ncol(pmc_filtered)))
-print(table(pmc_filtered$sex))
-
-cat("=== Step 4: Normalization & Variable Feature Selection ===\n")
 pmc_filtered <- NormalizeData(pmc_filtered, normalization.method = "LogNormalize", scale.factor = 10000, verbose = FALSE)
 pmc_filtered <- FindVariableFeatures(pmc_filtered, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
-
-cat("=== Step 5: Scaling Only Highly Variable Genes ===\n")
-top_features <- VariableFeatures(pmc_filtered)
-pmc_filtered <- ScaleData(pmc_filtered, features = top_features, verbose = FALSE)
-gc(verbose = FALSE)
-
-cat("=== Step 6: PCA, UMAP, and Clustering ===\n")
-pmc_filtered <- RunPCA(pmc_filtered, features = top_features, npcs = 30, verbose = FALSE)
+features <- VariableFeatures(pmc_filtered)
+pmc_filtered <- ScaleData(pmc_filtered, features = features, verbose = FALSE)
+pmc_filtered <- RunPCA(pmc_filtered, features = features, npcs = 30, verbose = FALSE)
 pmc_filtered <- FindNeighbors(pmc_filtered, dims = 1:20, verbose = FALSE)
 pmc_filtered <- FindClusters(pmc_filtered, resolution = 0.4, verbose = FALSE)
 pmc_filtered <- RunUMAP(pmc_filtered, dims = 1:20, verbose = FALSE)
 
-cat("=== Step 7: Saving Processed Seurat Object and Figures ===\n")
-saveRDS(pmc_filtered, file = "data/processed/pmc_barrington_seurat.rds")
-
-p1 <- DimPlot(pmc_filtered, reduction = "umap", group.by = "seurat_clusters", label = TRUE, label.size = 4) +
-      ggtitle("Barrington's Nucleus (PMC) - Clusters") +
-      theme_minimal()
-
-p2 <- DimPlot(pmc_filtered, reduction = "umap", group.by = "sex") +
-      ggtitle("Barrington's Nucleus (PMC) - Sex") +
-      theme_minimal()
-
-combined_plot <- p1 + p2
-ggsave("results/figures/umap_clusters_sex.png",
-       plot = combined_plot, width = 14, height = 6, dpi = 300)
-
-cat("=== Step 1 Pipeline Completed Successfully! ===\n")
+saveRDS(pmc_filtered, "data/processed/pmc_barrington_seurat.rds")
+p1 <- DimPlot(pmc_filtered, reduction = "umap", group.by = "seurat_clusters", label = TRUE) + ggtitle("Barrington's nucleus clusters")
+p2 <- DimPlot(pmc_filtered, reduction = "umap", group.by = "sex") + ggtitle("Sample sex")
+ggsave("results/figures/umap_clusters_sex.png", p1 + p2, width = 14, height = 6, dpi = 300)
+message("QC, clustering, and sample-level metadata saved.")

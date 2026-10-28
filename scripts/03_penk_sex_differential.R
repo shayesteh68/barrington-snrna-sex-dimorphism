@@ -1,82 +1,86 @@
+#!/usr/bin/env Rscript
+
 suppressPackageStartupMessages({
   library(Seurat)
+  library(Matrix)
+  library(DESeq2)
   library(ggplot2)
   library(dplyr)
   library(ggrepel)
 })
 
-cat("=== Step 1: Loading Processed Seurat Object ===\n")
-pmc <- readRDS("data/processed/pmc_barrington_seurat.rds")
+input_rds <- "data/processed/pmc_barrington_seurat.rds"
+if (!file.exists(input_rds)) stop("Processed object missing: ", input_rds)
+dir.create("results/tables", recursive = TRUE, showWarnings = FALSE)
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+
+pmc <- readRDS(input_rds)
 DefaultAssay(pmc) <- "RNA"
+cluster_id <- "8"
+if (!cluster_id %in% levels(Idents(pmc))) stop("Cluster 8 is absent; review the cluster annotation before DE.")
+if (!"Penk" %in% rownames(pmc)) stop("Penk is absent from the current RNA assay.")
+penk_expression <- FetchData(pmc, vars = "Penk", layer = "data")[["Penk"]]
+penk_by_cluster <- tapply(penk_expression, as.character(Idents(pmc)), mean, na.rm = TRUE)
+top_penk_cluster <- names(penk_by_cluster)[which.max(penk_by_cluster)]
+if (!identical(top_penk_cluster, cluster_id)) {
+  stop("Cluster 8 is not the current Penk-high cluster; review markers and update the selected cluster before DE.")
+}
+penk <- subset(pmc, idents = cluster_id)
+meta <- penk[[]][colnames(penk), , drop = FALSE]
+if (!all(c("sample_id", "sex") %in% names(meta))) stop("Object metadata must contain sample_id and sex.")
+if (anyNA(meta$sample_id) || anyNA(meta$sex)) stop("Missing sample_id or sex metadata.")
 
-cat("=== Step 2: Isolating Penk+ Barrington Nucleus Neurons (Cluster 8) ===\n")
-# Subset Cluster 8
-penk_neurons <- subset(pmc, idents = 8)
+sample_meta <- unique(meta[, c("sample_id", "sex"), drop = FALSE])
+if (anyDuplicated(sample_meta$sample_id)) stop("Each sample must map to exactly one sex.")
+sample_meta$sex <- factor(sample_meta$sex, levels = c("Male", "Female"))
+sample_meta <- sample_meta[!is.na(sample_meta$sex), , drop = FALSE]
+if (any(table(sample_meta$sex) < 2L)) stop("Pseudobulk DE requires at least two biological samples per sex.")
 
-cat("Cluster 8 total nuclei count:", ncol(penk_neurons), "\n")
-sex_counts <- table(penk_neurons$sex)
-print(sex_counts)
+counts <- GetAssayData(penk, assay = "RNA", layer = "counts")
+sample_factor <- factor(meta$sample_id, levels = sample_meta$sample_id)
+aggregation <- Matrix::sparse.model.matrix(~ 0 + sample_factor)
+colnames(aggregation) <- levels(sample_factor)
+pseudobulk <- as.matrix(counts %*% aggregation)
+storage.mode(pseudobulk) <- "integer"
+sample_meta <- sample_meta[match(colnames(pseudobulk), sample_meta$sample_id), , drop = FALSE]
+rownames(sample_meta) <- sample_meta$sample_id
 
-cat("=== Step 3: Running Sex-Differential Expression Analysis (Female vs Male) ===\n")
-Idents(penk_neurons) <- "sex"
+dds <- DESeqDataSetFromMatrix(countData = pseudobulk, colData = sample_meta, design = ~ sex)
+keep <- rowSums(counts(dds) >= 10) >= 2L
+dds <- dds[keep, ]
+if (nrow(dds) < 2L) stop("Too few genes remain after pseudobulk filtering.")
+dds <- DESeq(dds)
+res <- results(dds, contrast = c("sex", "Female", "Male"))
+deg <- as.data.frame(res)
+deg$gene <- rownames(deg)
+deg$significant <- !is.na(deg$padj) & deg$padj < 0.05 & abs(deg$log2FoldChange) >= 0.5
+deg <- deg[order(deg$padj, na.last = TRUE), , drop = FALSE]
 
-# Perform differential expression testing using Wilcoxon rank-sum test
-# comparing Female vs Male within Penk+ neurons
-deg_sex <- FindMarkers(
-  object = penk_neurons,
-  ident.1 = "Female",
-  ident.2 = "Male",
-  min.pct = 0.1,
-  logfc.threshold = 0.25,
-  test.use = "wilcox"
-)
+write.table(deg, "results/tables/penk_neurons_sex_degs.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+writeLines(c(
+  "GEO-batch-level pseudobulk DESeq2",
+  paste("Biological GEO batches:", nrow(sample_meta)),
+  paste("Male GEO batches:", sum(sample_meta$sex == "Male")),
+  paste("Female GEO batches:", sum(sample_meta$sex == "Female")),
+  "GSM libraries within the same Bar_* batch are aggregated before differential expression.",
+  "Each GEO batch pools multiple mice; cells and GSM libraries are not treated as independent replicates.",
+  "Contrast: Female versus Male",
+  "Threshold: padj < 0.05 and |log2FoldChange| >= 0.5",
+  "Cluster identity: cluster 8; current Penk expression check passed. Review after reclustering."
+), "results/tables/penk_neurons_sex_degs_summary.txt")
 
-# Format DEG table
-deg_sex$gene <- rownames(deg_sex)
-deg_sex$significant <- ifelse(deg_sex$p_val_adj < 0.05 & abs(deg_sex$avg_log2FC) >= 0.5, "Significant", "Not Significant")
-
-cat("Significant Sex-DEGs detected (FDR < 0.05, |log2FC| >= 0.5):", sum(deg_sex$significant == "Significant"), "\n")
-
-# Save table
-write.table(deg_sex, file = "results/tables/penk_neurons_sex_degs.tsv", 
-            sep = "\t", quote = FALSE, row.names = FALSE)
-cat("DEG results saved to: results/tables/penk_neurons_sex_degs.tsv\n")
-
-cat("=== Step 4: Generating Publication-Grade Volcano Plot ===\n")
-# Select top genes for labeling
-top_labeled_genes <- deg_sex %>%
-  filter(p_val_adj < 0.05) %>%
-  arrange(desc(abs(avg_log2FC))) %>%
-  head(15)
-
-p_volcano <- ggplot(deg_sex, aes(x = avg_log2FC, y = -log10(p_val_adj))) +
-  geom_point(aes(color = significant), alpha = 0.7, size = 1.8) +
-  scale_color_manual(values = c("Not Significant" = "#bdbdbd", "Significant" = "#d95f02")) +
-  geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", color = "grey40", size = 0.5) +
-  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey40", size = 0.5) +
-  geom_text_repel(
-    data = top_labeled_genes,
-    aes(label = gene),
-    size = 4,
-    fontface = "bold.italic",
-    box.padding = 0.4,
-    max.overlaps = 20
-  ) +
-  labs(
-    title = "Sex-Biased Gene Expression in Penk+ Barrington Nucleus Neurons",
-    subtitle = "Single-Nucleus RNA-seq Analysis (PMC Cohort: Female vs Male)",
-    x = "log2 Fold-Change (Positive = Female Enriched, Negative = Male Enriched)",
-    y = "-log10 (FDR-adjusted p-value)"
-  ) +
-  theme_bw(base_size = 12) +
-  theme(
-    legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
-    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "grey30"),
-    axis.title = element_text(face = "bold")
-  )
-
-ggsave("results/figures/penk_neurons_sex_volcano.png", p_volcano, width = 9, height = 7, dpi = 300)
-cat("Volcano plot saved to: results/figures/penk_neurons_sex_volcano.png\n")
-
-cat("=== Penk Sex DEG Pipeline Complete! ===\n")
+plot_data <- deg[!is.na(deg$padj), , drop = FALSE]
+plot_data$neg_log10_padj <- -log10(pmax(plot_data$padj, .Machine$double.xmin))
+top_labels <- plot_data %>% filter(significant) %>% arrange(padj, desc(abs(log2FoldChange))) %>% head(15)
+volcano <- ggplot(plot_data, aes(log2FoldChange, neg_log10_padj, color = significant)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c("FALSE" = "grey70", "TRUE" = "#d95f02")) +
+  geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_text_repel(data = top_labels, aes(label = gene), max.overlaps = 20) +
+  labs(title = "Penk-high cluster: GEO-batch-level sex contrast",
+       x = "DESeq2 log2 fold change (Female versus Male)",
+       y = "-log10 adjusted p-value", color = "Significant") +
+  theme_bw()
+ggsave("results/figures/penk_neurons_sex_volcano.png", volcano, width = 9, height = 7, dpi = 300)
+message("GEO-batch-level pseudobulk results saved.")

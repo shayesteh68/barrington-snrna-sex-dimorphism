@@ -1,0 +1,16 @@
+name: barrington-snrna
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.3
+  - r-seurat
+  - r-ggplot2
+  - r-dplyr
+  - r-patchwork
+  - r-ggrepel
+  - bioconductor-geoquery
+  - bioconductor-deseq2
+  - bioconductor-clusterprofiler
+  - bioconductor-org.mm.eg.db
+  - bioconductor-enrichplot

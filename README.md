@@ -1,95 +1,25 @@
-# Single-Nucleus RNA-Seq Analysis of Barrington's Nucleus (PMC)
+# Barrington's nucleus single-nucleus RNA-seq
 
-## Dissecting Neuronal Heterogeneity and Sex-Biased Transcriptional Programs in GSE226809
+This repository analyzes the Barrington's nucleus (PMC) subset of GEO series GSE226809, a single-cell atlas of the mouse dorsal pons. The workflow loads GEO library count matrices, performs QC and clustering, then estimates a sex contrast for the selected Penk-high cluster.
 
-This repository provides an end-to-end, reproducible single-nucleus RNA-sequencing (snRNA-seq) workflow analyzing the Barrington's nucleus (Pontine Micturition Center, PMC) from mouse brainstem, based on GEO accession GSE226809. The analysis leverages Seurat v5 and clusterProfiler in R to profile cellular heterogeneity, isolate micturition-regulatory peptidergic populations (Penk+ Barrington neurons), identify sex-dimorphic transcriptional signatures, and model biological pathway enrichment.
+## Data and environment
 
-**Author:** Narges Shayesteh — Bioinformatics Researcher 
-**LinkedIn:** https://www.linkedin.com/in/narges-shayesteh 
+Run Rscript scripts/00_download_geo.R to download and unpack GEO supplementary files into data/raw/. The analysis expects files named GSM..._Mm_PMC_..._dge.tsv.gz.
 
----
+Create and activate the environment with conda env create -f environment.yml and conda activate barrington-snrna.
 
-## 1. Biological Background & Motivation
+## Pipeline
 
-Barrington's nucleus (PMC), situated in the dorsomedial pontine tegmentum, functions as the central neural command hub orchestrating micturition reflex circuits. Emerging evidence highlights sexual dimorphism in lower urinary tract dysfunction and PMC physiological responses. By profiling single-nucleus transcriptomes across 30 multiplexed male and female samples, this pipeline resolves:
-- Cell-type diversity spanning pontine neuronal subsets and non-neuronal parenchymal lineages.
-- Peptidergic identity centered on Penk (proenkephalin)-positive neurons defining the core Barrington population.
-- Sex-biased differential gene expression (DEG) and associated epigenetic/chromatin-remodeling functional networks.
+Run these commands from the repository root:
 
----
+1. Rscript scripts/00_download_geo.R
+2. Rscript scripts/01_load_qc_integrate.R
+3. Rscript scripts/02_annotate_celltypes.R
+4. Rscript scripts/03_penk_sex_differential.R
+5. Rscript scripts/04_pathway_enrichment.R
 
-## 2. Dataset Architecture
+The previous cell-level Wilcoxon p-values treated nuclei as independent biological replicates. The updated differential analysis uses one pseudobulk count column per GEO batch and requires at least two batches per sex. Old DEG and enrichment outputs are retained for provenance but are not validated by the corrected model; regenerate them before citing.
 
-| Property | Value |
-|---|---|
-| **Accession** | NCBI GEO [GSE226809](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE226809) |
-| **Organism** | *Mus musculus* (C57BL/6J) |
-| **Platform** | 10x Genomics Chromium Single Cell Multiome / snRNA-seq |
-| **Cohorts** | 30 multiplexed brainstem/PMC libraries (Male & Female) |
-| **Input Nuclei** | 97,729 raw nuclear profiles |
-| **Filtered Nuclei** | 66,994 high-quality nuclei post-QC |
-| **Framework** | R 4.3.3 / Seurat v5.0 / clusterProfiler 4.10 |
+Cluster 8 is the default Penk-positive population carried over from the existing annotation. Confirm the cluster-to-cell-type mapping after rerunning clustering because cluster numbers can change.
 
----
-
-## 3. Computational Pipeline & Memory Optimization
-
-Processing dense count tables across 30 deep single-cell libraries poses severe out-of-memory (OOM) bottlenecks in standard workstations. To ensure strict scalability, this pipeline implements:
-1. **Memory-Safe Sparse Loading:** Bypasses intermediate dense R representations (as.matrix()), converting directly from low-level sparse matrices into compressed dgCMatrix structures.
-2. **Droplet Pre-filtering:** Enforces an immediate cut-off (nFeature >= 200) prior to object binding, eliminating background droplets early.
-3. **Layered Integration:** Employs incremental pairwise merge() loops coupled with proactive garbage collection (gc()).
-
-### Modular Script Workflow
-
-- **scripts/01_load_qc_integrate.R**:
-  Parses all 30 sample count matrices, executes strict QC (nFeature_RNA >= 200, low mitochondrial contamination), joins Seurat v5 layers, normalizes (LogNormalize, scale factor 10,000), detects 2,000 highly variable features (HVGs), runs PCA (30 PCs), and performs graph-based clustering (Louvain, resolution 0.5). Retains **66,994 high-quality nuclei** partitioned into **23 stable clusters**.
-- **scripts/02_annotate_celltypes.R**:
-  Surveys canonical lineage markers (Slc17a6, Gad1, Gad2, Aqp4, Mbp, C1qa, Penk, Crh) to resolve glutamatergic, GABAergic, and glial compartments, isolating Cluster 8 as the core Penk+ Barrington neuronal population.
-- **scripts/03_penk_sex_differential.R**:
-  Subsets Cluster 8 (Penk+ neurons) and evaluates sex-dimorphic expression between male and female nuclei using the Wilcoxon Rank-Sum test (min.pct = 0.1, logfc.threshold = 0.25).
-- **scripts/04_pathway_enrichment.R**:
-  Maps significant DEGs to Entrez IDs via org.Mm.eg.db and computes Over-Representation Analysis (ORA) across Gene Ontology (GO: Biological Process).
-
----
-
-## 4. Key Results
-
-### A. Dimensionality Reduction & Clustering
-Unsupervised analysis resolves 23 distinct clusters representing pontine neuronal diversity and glial populations, preserving balanced representation across biological sexes.
-- Visualized in results/figures/umap_clusters_sex.png.
-
-### B. Sex-Dimorphic Signature in Penk+ Neurons
-Differential expression analysis revealed canonical sex-chromosome-linked genes as robust internal positive controls:
-- **Female-enriched:** Xist (log2FC = 8.49, adp.p = 5.58e-198), Tsix (log2FC = 5.69, adjp.p = 7.71e-37).
-- **Male-enriched:** Eif2s3y (log2FC = -11.26, adjp.p = 1.50e-56), Kdm5d (log2FC = -10.22, adjp.p = 2.83e-28), Uty (log2FC = -6.14, adp.p = 1.34e-18), Ddx3y (log2FC = -7.53, adjp.p = 3.65e-14).
-- Tabulated in results/tables/penk_neurons_sex_degs.tsv and plotted in results/figures/penk_neurons_sex_volcano.png.
-
-### C. Functional Enrichment (GO Biological Process)
-Over-representation analysis of sex-dimorphic factors highlights significant regulatory pathways:
-- **Chromatin remodeling** (GO:0006338, p_adj = 5.68e-05)
-- **Epigenetic regulation of gene expression** (GO:0040029, p_adj = 2.35e-04)
-- **Dosage compensation by X-chromosome inactivation** (GO:0009048, p_adj = 2.86e-04)
-- **Formation of translation preinitiation complex** (GO:0001731, p_adj = 0.019)
-- Summarized in results/tables/penk_sex_go_enrichment.tsv and visualized in results/figures/penk_sex_go_dotplot.png.
-
----
-
-## 5. Execution & Reproducibility
-
-### Conda Environment Setup
-conda activate r_seurat_env
-
-### Running the Complete Pipeline
-Rscript scripts/01_load_qc_integrate.R
-Rscript scripts/02_annotate_celltypes.R
-Rscript scripts/03_penk_sex_differential.R
-Rscript scripts/04_pathway_enrichment.R
-
----
-
-## 6. License & Citation
-
-Distributed under the MIT License. If using code or analyses from this repository, please cite:
-- **GSE226809**: NCBI Gene Expression Omnibus.
-- **Seurat v5**: Hao et al., Nature Biotechnology (2024).
-- **clusterProfiler**: Wu et al., The Innovation (2021).
+The GEO records identify PMC libraries with a `Bar_*` batch and an F/M sex suffix. The loader records every GSM library and batch in `results/tables/GSE226809_PMC_library_manifest.tsv`, then aggregates libraries from the same GEO batch for pseudobulk. The GEO series describes each batch as a pool of multiple mice, so the batch is the replicate unit; cells and GSM libraries are not counted as independent replicates. Cluster 8 is used only if it remains the Penk-high cluster in the current object. The MIT license applies to repository code; GEO data remain subject to the source terms.

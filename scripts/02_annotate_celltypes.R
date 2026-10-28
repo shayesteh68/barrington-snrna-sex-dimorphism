@@ -28,7 +28,10 @@ markers_to_check <- list(
 # Flatten list and verify presence in dataset
 all_markers <- unlist(markers_to_check, use.names = FALSE)
 existing_markers <- all_markers[all_markers %in% rownames(pmc)]
+if (!length(existing_markers)) stop("None of the configured marker genes are present in the RNA assay.")
 cat("Markers detected in RNA assay:", paste(existing_markers, collapse = ", "), "\n")
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create("results/tables", recursive = TRUE, showWarnings = FALSE)
 
 cat("=== Step 3: Generating Marker DotPlot ===\n")
 p_dot <- DotPlot(pmc, features = existing_markers, cols = c("lightgrey", "darkblue"), dot.scale = 6) +
@@ -47,6 +50,7 @@ cat("=== Step 4: Generating PMC Key Markers FeaturePlot ===\n")
 # Highlighting PMC specific markers: Crh, Penk, Slc17a6, Gad1
 key_pmc_genes <- c("Crh", "Penk", "Slc17a6", "Gad1")
 key_pmc_genes <- key_pmc_genes[key_pmc_genes %in% rownames(pmc)]
+if (!length(key_pmc_genes)) stop("None of the configured key PMC genes are present in the RNA assay.")
 
 p_feat <- FeaturePlot(pmc, features = key_pmc_genes, ncol = 2, pt.size = 0.3, cols = c("lightgrey", "#b2182b"))
 ggsave("results/figures/barrington_key_markers_featureplot.png", p_feat, width = 11, height = 9, dpi = 300)
