@@ -1,0 +1,3 @@
+direction	tested_symbols	mapped_background_entrez	significant_symbols	mapped_significant_entrez	enriched_terms	status	mapping_fraction_background
+Female	6100	5822	2	2	0	fewer_than_three_mapped_genes	0.954426229508197
+Male	6100	5822	4	4	0	no_enriched_terms	0.954426229508197

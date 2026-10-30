@@ -1,0 +1,13 @@
+GEO Bar batch-pool pseudobulk DESeq2
+GEO Bar batch-pool units: 9
+Male batch-pool units: 4
+Female batch-pool units: 5
+GSM libraries sharing a Bar_* GEO label are aggregated before differential expression.
+One pseudobulk column represents one GEO Bar batch pool; nuclei and GSM libraries within that pool are not treated as independent replicates.
+Unpaired comparison: 5 female and 4 male GEO batch pools after QC.
+The GEO DGE matrices expose Bar_* batch labels but no individual-animal IDs or paired animal-level measurements. This unpaired batch-group contrast is exploratory and cannot recover within-group animal variation.
+Contrast: Female versus Male
+Candidate threshold: DESeq2 Wald test of |log2FoldChange| > 0.5, BH-adjusted p < 0.05.
+The standard zero-effect Wald p-value and the threshold-test p-value are both reported.
+Cluster identity: 7 selected by highest mean Penk expression in this workflow; it is a Penk-enriched candidate, not a validated match to the published excitatory Bar-Penk cluster.
+Canonical marker evidence shows mixed inhibitory and oligodendrocyte-associated signal in the selected cluster; interpret its cell identity cautiously.

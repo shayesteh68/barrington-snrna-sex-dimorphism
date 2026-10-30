@@ -1,0 +1,6 @@
+Canonical marker detection and mean log-normalized expression are descriptive evidence, not automatic cell-type calls.
+FindAllMarkers uses a fixed random seed and tests at most 250 cells per identity; cells were sampled from the full object before testing to bound memory.
+Marker scan cells: 5287 of 53035 QC-passing cells.
+Highest mean Penk cluster: 7
+Top mean log-normalized Penk expression: 1.149
+FindAllMarkers uses a cell-level Wilcoxon rank-sum test only to describe cluster markers; its p-values are not biological-replicate inference.

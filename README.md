@@ -1,25 +1,38 @@
-# Barrington's nucleus single-nucleus RNA-seq
+# Barrington's nucleus snRNA-seq analysis
 
-This repository analyzes the Barrington's nucleus (PMC) subset of GEO series GSE226809, a single-cell atlas of the mouse dorsal pons. The workflow loads GEO library count matrices, performs QC and clustering, then estimates a sex contrast for the selected Penk-high cluster.
+This repository contains a focused, independent reanalysis of the 30 Barrington's nucleus (Bar/PMC) count matrices in GEO series GSE226809. It is not a reproduction of either the full dorsal pons atlas or the later Bar-Penk paper.
 
-## Data and environment
+## Sources and scope
 
-Run Rscript scripts/00_download_geo.R to download and unpack GEO supplementary files into data/raw/. The analysis expects files named GSM..._Mm_PMC_..._dge.tsv.gz.
+The source atlas contains 72 DroNc-seq DGE matrices: 42 from parabrachial nucleus-centered dissections and 30 from Bar-centered dissections. This workflow analyzes the 30 Bar matrices only. The accession, GEO title, region, `Bar_*` group label, and sex for each library are recorded in [`metadata/GSE226809_PMC_GEO_sample_manifest.tsv`](metadata/GSE226809_PMC_GEO_sample_manifest.tsv); the loader checks each file against this manifest.
 
-Create and activate the environment with conda env create -f environment.yml and conda activate barrington-snrna.
+Source references:
 
-## Pipeline
+- Nardone et al., *Nature Communications* (2024), [doi:10.1038/s41467-024-45907-7](https://doi.org/10.1038/s41467-024-45907-7).
+- Klymko et al., *Nature Communications* (2026), [doi:10.1038/s41467-026-77949-4](https://doi.org/10.1038/s41467-026-77949-4), with the authors' processed objects and Seurat workflow at [Zenodo record 15225406](https://doi.org/10.5281/zenodo.15225406).
 
-Run these commands from the repository root:
+The later Bar-Penk study uses a staged analysis to identify an excitatory Penk population. Its filters, doublet handling, SCTransform workflow, cell exclusions, and reclustering differ from this repository. The analysis here therefore does not claim to reproduce that population or its published figures.
 
-1. Rscript scripts/00_download_geo.R
-2. Rscript scripts/01_load_qc_integrate.R
-3. Rscript scripts/02_annotate_celltypes.R
-4. Rscript scripts/03_penk_sex_differential.R
-5. Rscript scripts/04_pathway_enrichment.R
+## Methods and interpretation
 
-The previous cell-level Wilcoxon p-values treated nuclei as independent biological replicates. The updated differential analysis uses one pseudobulk count column per GEO batch and requires at least two batches per sex. Old DEG and enrichment outputs are retained for provenance but are not validated by the corrected model; regenerate them before citing.
+The workflow applies the source atlas's mouse QC limits of 400-10,000 detected genes, at most 10% mitochondrial counts, and at most 5% hemoglobin counts. It uses LogNormalize, 2,000 variable genes, 20 PCs, resolution 0.4, fixed random seeds, and no batch correction. In the 2026-10-29 audit run, 53,035 cells passed these filters and formed 23 clusters. These settings intentionally define a lower-memory independent analysis; results are expected to differ from the later paper.
 
-Cluster 8 is the default Penk-positive population carried over from the existing annotation. Confirm the cluster-to-cell-type mapping after rerunning clustering because cluster numbers can change.
+The marker workflow calculates canonical-marker detection and mean expression from all QC-passing cells. The genome-wide Wilcoxon marker scan uses a reproducible sample of at most 250 cells per cluster to bound memory. Its cell-level p-values are descriptive and are not biological-replicate tests or automatic cell-type assignments.
 
-The GEO records identify PMC libraries with a `Bar_*` batch and an F/M sex suffix. The loader records every GSM library and batch in `results/tables/GSE226809_PMC_library_manifest.tsv`, then aggregates libraries from the same GEO batch for pseudobulk. The GEO series describes each batch as a pool of multiple mice, so the batch is the replicate unit; cells and GSM libraries are not counted as independent replicates. Cluster 8 is used only if it remains the Penk-high cluster in the current object. The MIT license applies to repository code; GEO data remain subject to the source terms.
+For the secondary sex contrast, the pipeline selects the cluster with the highest mean log-normalized Penk expression in the current run, then sums raw counts by the nine GEO `Bar_*` group labels (five female and four male). The selected cluster is a candidate, not a validated match to the published excitatory Bar-Penk population. In the audit run it was cluster 7: 38.4% Penk-positive, 8.7% Slc17a6-positive, 47.2% Gad2-positive, and 44.5% Mbp-positive. These mixed markers make its cell identity provisional.
+
+The sample labels provide group-level GEO batches, not individual-animal IDs or paired animal-level measurements. The DESeq2 contrast is unpaired and exploratory; nuclei and GSM libraries are not treated as independent replicates, and the result cannot estimate animal-to-animal variation within a group. In the audit run, six genes passed the formal absolute log2 fold-change >0.5 test at BH-adjusted p <0.05; all six were sex-chromosome genes. Directional GO enrichment is skipped when fewer than three significant mapped genes are available, to avoid interpreting pathways driven by only one or two genes.
+
+## Workflow
+
+Run commands from the repository root. Create the Conda environment with `conda env create -f environment.yml`. For the pinned Linux package solution, use `environment-linux-64.lock.txt`.
+
+1. `Rscript scripts/00_download_geo.R` downloads and validates the GEO supplementary archive, then extracts the matrices to `data/raw/`.
+2. `Rscript scripts/01_load_qc_integrate.R` validates integer counts, saves sparse per-library ingest checkpoints, checks GEO metadata, applies QC, clusters the cells, and saves the processed object and UMAP.
+3. `Rscript scripts/02_annotate_celltypes.R` writes canonical-marker evidence from all cells, cluster sizes, a memory-bounded descriptive marker scan, and marker plots.
+4. `Rscript scripts/03_penk_sex_differential.R` records the current highest-Penk cluster, aggregates raw counts by GEO group, and runs the exploratory batch-group pseudobulk DESeq2 contrast.
+5. `Rscript scripts/04_pathway_enrichment.R` uses the tested, Entrez-mapped genes as the GO background and writes a summary even when no direction has enough genes for enrichment.
+
+## Outputs and data handling
+
+The workflow writes sample and QC manifests, cluster sizes, marker evidence, cluster-selection evidence, pseudobulk sample QC, DESeq2 results, enrichment summaries, figures, and R session information under `results/` and `run_logs/`. Raw GEO files, extracted count matrices, sparse ingest checkpoints, and Seurat objects stay under the ignored `data/` directory and are not committed. The MIT license applies to repository code; source data remain subject to GEO and source-study terms.
