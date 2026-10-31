@@ -2,14 +2,16 @@
 
 This repository contains a focused, independent reanalysis of the 30 Barrington's nucleus (Bar/PMC) count matrices in GEO series GSE226809. It is not a reproduction of either the full dorsal pons atlas or the later Bar-Penk paper.
 
+This is an independent portfolio case study using public data. It was not commissioned by, or conducted in collaboration with, the source-study authors or their institutions.
+
 ## Sources and scope
 
 The source atlas contains 72 DroNc-seq DGE matrices: 42 from parabrachial nucleus-centered dissections and 30 from Bar-centered dissections. This workflow analyzes the 30 Bar matrices only. The accession, GEO title, region, `Bar_*` group label, and sex for each library are recorded in [`metadata/GSE226809_PMC_GEO_sample_manifest.tsv`](metadata/GSE226809_PMC_GEO_sample_manifest.tsv); the loader checks each file against this manifest.
 
-Source references:
+Data source and related study:
 
-- Nardone et al., *Nature Communications* (2024), [doi:10.1038/s41467-024-45907-7](https://doi.org/10.1038/s41467-024-45907-7).
-- Klymko et al., *Nature Communications* (2026), [doi:10.1038/s41467-026-77949-4](https://doi.org/10.1038/s41467-026-77949-4), with the authors' processed objects and Seurat workflow at [Zenodo record 15225406](https://doi.org/10.5281/zenodo.15225406).
+- Source atlas: Nardone et al., “A spatially-resolved transcriptional atlas of the murine dorsal pons at single-cell resolution,” *Nature Communications* (2024), [doi:10.1038/s41467-024-45907-7](https://doi.org/10.1038/s41467-024-45907-7).
+- Related Bar-Penk study: Klymko et al., “Descending Enkephalinergic neurons in Barrington’s nucleus gate sex-biased control of micturition,” *Nature Communications* (2026), [doi:10.1038/s41467-026-77949-4](https://doi.org/10.1038/s41467-026-77949-4). The authors' processed objects and Seurat workflow are at [Zenodo record 15225406](https://doi.org/10.5281/zenodo.15225406).
 
 The later Bar-Penk study uses a staged analysis to identify an excitatory Penk population. Its filters, doublet handling, SCTransform workflow, cell exclusions, and reclustering differ from this repository. The analysis here therefore does not claim to reproduce that population or its published figures.
 
